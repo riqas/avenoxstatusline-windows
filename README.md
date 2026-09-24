@@ -1,85 +1,49 @@
-# avenoxstatusline
+# avenoxstatusline — Windows
 
-A two-line status line for [Claude Code](https://claude.com/claude-code) with an ASCII pet.
-
-**132 lines of bash. No npm, no node, no build step.**
+A Windows-ready fork of [**avenoxai/avenoxstatusline**](https://github.com/avenoxai/avenoxstatusline),
+the two-line [Claude Code](https://claude.com/claude-code) status line with an ASCII pet.
 
 ```
-ʕ•ᴥ•ʔ☕  Opus 5 · high · think   5h 41% · 7d 63%
-▓▓▓▓░░░░ 62%  ⎇ main*  ● serai:vegrun
+ʕ•ᴥ•ʔ☕  Opus 5.5 · high · think   5h 41% · 7d 63%
+━━━━━───  62%  ⎇ main*
 ```
+
+All credit for the idea, the pet and the stateless animation trick goes to
+[Avenox](https://github.com/avenoxai). This fork only makes it run correctly on
+Windows (Git Bash) and adds a one-command installer.
+
+> 🇹🇷 **Türkçe kısa kurulum:** PowerShell'i aç, aşağıdaki tek satırı yapıştır, Claude Code'u
+> yeniden başlat. jq yoksa kendisi kurar, `settings.json`'ı yedekleyip günceller.
 
 ---
 
-## Why another one
+## Install (Windows)
 
-There are plenty of good Claude Code status lines. Two things make this one different.
+In PowerShell:
 
-### 1. It's a shell script, not a package
+```powershell
+irm https://raw.githubusercontent.com/riqas/avenoxstatusline-windows/main/install.ps1 | iex
+```
 
-Your status line re-runs **every few seconds, forever**. Every render is a fresh
-process. Spawning a Node runtime on that loop is a strange thing to do to your
-laptop.
+Then restart Claude Code. The installer:
 
-This is one `bash` file with two dependencies you already have (`git`, `jq`).
-Install is a `curl` and one line of JSON. There is nothing to update, nothing to
-audit, and nothing in `node_modules`.
+1. installs `jq` with winget if it can't find it,
+2. downloads `statusline.sh` to `~/.claude/statusline.sh`,
+3. adds the `statusLine` block to `~/.claude/settings.json` — after writing a
+   backup to `settings.json.bak-statusline`.
 
-### 2. The pet is a gauge, not an ornament
+Requirements: Windows 10/11, winget, Git for Windows (Claude Code on Windows
+already needs Git Bash).
 
-The bear's mood is **derived from session state**, so you can read how the
-session is doing without reading any numbers:
+**Uninstall:** delete the `statusLine` block from `~/.claude/settings.json`
+(or restore the backup).
 
-| State | Pet | Meaning |
-|---|---|---|
-| context ≥ 90% | `ʕ⊙ᴥ⊙ʔ‼` red, flailing | you are about to compact |
-| context ≥ 75% | `ʕ•﹏•ʔ💦` yellow, sweating | start wrapping up |
-| pending approvals | `ʕ•ᴥ•ʔ❗` yellow, alert | something is waiting on you |
-| effort `xhigh` / `max` | `ʕ◣_◢ʔ⚡` locked in | the expensive gear is engaged |
-| context ≥ 50% | `ʕ◔ᴥ◔ʔ` focused | working |
-| otherwise | `ʕ•ᴥ•ʔ` idle | blinks, glances, leans |
-
-Peripheral vision does the monitoring. You only look directly at the line when
-the bear changes.
-
-And when nothing is wrong, it does things. Roughly every 10 seconds it pulls a
-~4-second stunt — nap, dance, wave, table flip (and sets the table back),
-flower, coffee, sparkle, hug, wander.
-
----
-
-## The trick: animating a stateless script
-
-Claude Code runs the status line command fresh on every render. There is no
-process to hold a frame counter in, so conventional animation is impossible.
-
-So the frames are indexed by **wall-clock time** instead of by state:
+### Manual install
 
 ```bash
-T=${SL_TICK:-$(date +%s)}
-frame() { local -a a=("${@:2}"); PET="${a[$(( $1 % ${#a[@]} ))]}"; }
-
-frame "$T" "ʕ•ᴥ•ʔ" "ʕ•ᴥ•ʔ" "ʕ-ᴥ-ʔ" "ʕ◕ᴥ◕ʔ"   # idle: blinks
-```
-
-Each render independently computes *which frame it is right now*. The script
-stays completely stateless and the pet still walks through its frames as time
-passes. Stunts use the same idea at two scales: `T % 10` picks the position
-within a stunt, `(T / 10) % 9` picks which stunt.
-
-`SL_TICK` pins the clock so you can screenshot or test a specific frame.
-
----
-
-## Install
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/avenoxai/avenoxstatusline/main/statusline.sh \
+curl -fsSL https://raw.githubusercontent.com/riqas/avenoxstatusline-windows/main/statusline.sh \
   -o ~/.claude/statusline.sh
-chmod +x ~/.claude/statusline.sh
 ```
-
-Then add to `~/.claude/settings.json`:
 
 ```json
 {
@@ -91,21 +55,47 @@ Then add to `~/.claude/settings.json`:
 }
 ```
 
-Requirements: `bash` (3.2+, so stock macOS works), `git`, `jq`.
-Tested on macOS and Linux.
+The script still works on macOS and Linux exactly like upstream.
 
 ---
 
-## What's on the line
+## What was broken on Windows
 
-**Line 1** — pet, model, reasoning effort, extended thinking, and your 5-hour /
-7-day rate-limit usage.
+The upstream script is written for macOS/Linux. On Windows it runs, but silently
+renders wrong numbers. Four fixes:
 
-**Line 2** — context bar (green → yellow → red), context %, branch (`*` = dirty
-tracked files), worktree, project badge, pending approvals, sync state.
+| Symptom on Windows | Cause | Fix |
+|---|---|---|
+| Context always shows **0%**, a stray `⑂` appears | Windows `jq.exe` prints CRLF; the `\r` sticks to every field, so numbers fail validation and empty fields look non-empty | pipe jq output through `tr -d '\r'` |
+| Error text dumped into the line, cache never hits | Git Bash's `stat` is GNU: `stat -f` means *filesystem* status, exits 0 and prints a block of text instead of an mtime | try `stat -c %Y` first, BSD `stat -f %m` second |
+| `⎇ 0` shown as the branch in non-git folders (also on macOS) | the 5s git cache was written tab-separated — the same IFS-whitespace collapse the README warns about, so empty fields shifted left | cache fields separated by `\x1f` (not whitespace, never collapses) |
+| Context bar invisible at low usage | `░` renders near-invisible in common Windows Terminal fonts | bar drawn with `━` (filled, colored) and `─` (empty, dim) |
+| `jq not found` right after installing it | Claude Code's PATH is captured at launch; winget's shim isn't always created | script also looks in `~/.claude/bin` and winget's `jqlang.jq_*` package folder |
 
-Every segment hides itself when it has nothing to say. In a plain directory
-with no git, line 2 is just the context bar.
+---
+
+## The pet is a gauge
+
+Its mood is derived from session state, so you can read how the session is going
+without reading numbers:
+
+| State | Pet | Meaning |
+|---|---|---|
+| context ≥ 90% | `ʕ⊙ᴥ⊙ʔ‼` red | about to compact |
+| context ≥ 75% | `ʕ•﹏•ʔ💦` yellow | start wrapping up |
+| pending approvals | `ʕ•ᴥ•ʔ❗` yellow | something is waiting on you |
+| effort `xhigh` / `max` | `ʕ◣_◢ʔ⚡` | the expensive gear is engaged |
+| context ≥ 50% | `ʕ◔ᴥ◔ʔ` | working |
+| otherwise | `ʕ•ᴥ•ʔ` | idle — blinks, and every ~10s pulls a stunt (nap, dance, table flip…) |
+
+**Line 1:** pet, model, reasoning effort, thinking, 5-hour / 7-day rate-limit usage.
+**Line 2:** context bar (green → yellow → red), context %, git branch (`*` = dirty),
+worktree, project badge.
+
+Every segment hides itself when it has nothing to say.
+
+How the animation works without any state — frames are indexed by wall-clock
+time — is explained in the [upstream README](https://github.com/avenoxai/avenoxstatusline#the-trick-animating-a-stateless-script).
 
 ---
 
@@ -113,57 +103,19 @@ with no git, line 2 is just the context bar.
 
 | Env var | Effect |
 |---|---|
-| `SL_BADGE_CMD` | Run any command in the repo root; its first stdout line becomes the project badge. A `prefix:value` string renders the prefix dimmed. |
-| `SL_NO_SERAI=1` | Disable the built-in Serai badge. |
-| `SL_TICK=<int>` | Pin the animation clock. Useful for screenshots and tests. |
+| `SL_BADGE_CMD` | Any command run in the repo root; its first stdout line becomes the project badge. `prefix:value` renders the prefix dimmed. |
+| `SL_NO_SERAI=1` | Disable the built-in [Serai](https://serai.run) badge. |
+| `SL_TICK=<int>` | Pin the animation clock (screenshots, tests). |
 
-Custom badge example:
-
-```bash
-export SL_BADGE_CMD='cat .env 2>/dev/null | grep -m1 ^APP_ENV= | cut -d= -f2 | sed "s/^/env:/"'
-```
-
-### The Serai badge
-
-Out of the box, if the repo contains `.serai/config.json`, the line shows
-`● serai:<repo>` plus pending approval count (`⚑2`) and sync freshness
-(`●sync` live / `○sync` stale). That's [Serai](https://serai.run), a control
-plane for coding agents.
-
-If you don't use it, nothing renders and nothing is read. `SL_BADGE_CMD` takes
-priority over it, and `SL_NO_SERAI=1` turns it off entirely.
-
----
-
-## Seeing it without installing it
+## Smoke test
 
 ```bash
-./demo.sh          # every mood state, side by side
+./demo.sh          # every mood state
 ./demo.sh stunts   # all 9 idle stunts, frame by frame
 ```
-
-`demo.sh` pins `SL_TICK`, so it is also the smoke test — every state, a
-non-git directory, and malformed input all render or the script is broken.
-
----
-
-## Notes on correctness
-
-Two things this script is deliberate about, because both are easy to get wrong:
-
-**Caching.** Git calls are cached ~5s, keyed by `session_id`. Keying a cache off
-`$$` looks reasonable and never hits — every render is a new PID.
-
-**Field parsing.** The JSON payload is read **one field per line**, not
-tab-separated. Tab is IFS whitespace, so `IFS=$'\t' read -r a b c` silently
-collapses runs of tabs and every field after an empty one shifts left. Since
-`git_worktree` is empty whenever you are *not* in a worktree — the normal case —
-the working directory would land in the worktree slot and the session id in the
-working directory slot, quietly killing every git lookup on line 2. `IFS= read -r`
-per line keeps empty fields empty.
 
 ---
 
 ## License
 
-MIT © Avenox
+MIT © Avenox — Windows changes © 2026 riqas, same license.

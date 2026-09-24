@@ -20,8 +20,12 @@
 #
 # License: MIT
 
-# Prepend common package-manager bins only if they exist (macOS/Linux friendly).
-for d in /opt/homebrew/bin /usr/local/bin; do
+# Prepend common package-manager bins only if they exist.
+# Windows: Claude Code's PATH is captured at launch, so a jq installed by winget
+# afterwards is invisible until restart — and winget's Links shim isn't always
+# created. Look in ~/.claude/bin and winget's package folder directly.
+for d in /opt/homebrew/bin /usr/local/bin "$HOME/.claude/bin" \
+         "$HOME"/AppData/Local/Microsoft/WinGet/Packages/jqlang.jq_*; do
   [ -d "$d" ] && case ":$PATH:" in *":$d:"*) ;; *) PATH="$d:$PATH";; esac
 done
 export PATH
@@ -60,7 +64,7 @@ CY="${ESC}[36m"; GR="${ESC}[32m"; YE="${ESC}[33m"; RD="${ESC}[31m"; MG="${ESC}[3
       (.workspace.git_worktree // ""),
       (.workspace.current_dir // .cwd // "."),
       (.session_id // "nosess")
-    ] | .[] | tostring | gsub("[\r\n\t]"; " ")' 2>/dev/null
+    ] | .[] | tostring | gsub("[\r\n\t]"; " ")' 2>/dev/null | tr -d '\r'   # Windows jq emits CRLF
 )
 
 # ---- sanitize numerics (never let arithmetic crash the bar) ----
@@ -73,9 +77,10 @@ CWD=${CWD:-.}; SID=${SID:-nosess}
 CACHE="${TMPDIR:-/tmp}/cc-sl-${SID//[^A-Za-z0-9]/_}.cache"
 now=$(date +%s 2>/dev/null || echo 0)
 # stat -f is BSD/macOS, stat -c is GNU/Linux — try both before giving up.
-mt=$(stat -f %m "$CACHE" 2>/dev/null || stat -c %Y "$CACHE" 2>/dev/null || echo 0)
+mt=$(stat -c %Y "$CACHE" 2>/dev/null || stat -f %m "$CACHE" 2>/dev/null || echo 0)
 if [ -s "$CACHE" ] && [ $((now - mt)) -lt 5 ]; then
-  IFS=$'\t' read -r BRANCH DIRTY BADGE SYNC APPROV < "$CACHE"
+  # \x1f, not \t: tab is IFS whitespace, so empty fields would collapse and shift left
+  IFS=$'\x1f' read -r BRANCH DIRTY BADGE SYNC APPROV < "$CACHE"
 else
   BRANCH=$(git -C "$CWD" symbolic-ref --short HEAD 2>/dev/null \
            || git -C "$CWD" rev-parse --short HEAD 2>/dev/null || echo "")
@@ -104,7 +109,7 @@ else
     fi
   fi
   APPROV=$(int "$APPROV" 0)
-  printf '%s\t%s\t%s\t%s\t%s' "$BRANCH" "$DIRTY" "$BADGE" "$SYNC" "$APPROV" > "$CACHE" 2>/dev/null
+  printf '%s\x1f%s\x1f%s\x1f%s\x1f%s' "$BRANCH" "$DIRTY" "$BADGE" "$SYNC" "$APPROV" > "$CACHE" 2>/dev/null
 fi
 APPROV=$(int "$APPROV" 0)
 [ ${#BRANCH} -gt 24 ] && BRANCH="${BRANCH:0:23}…"
@@ -146,8 +151,9 @@ fi
 # ---- context bar (8 wide) + band color ----
 if   [ "$CTX" -ge 80 ]; then CC="$RD"; elif [ "$CTX" -ge 50 ]; then CC="$YE"; else CC="$GR"; fi
 bw=8; fill=$((CTX*bw/100)); [ $fill -gt $bw ] && fill=$bw; [ $fill -lt 0 ] && fill=0; empty=$((bw-fill))
-bar=""; i=0; while [ $i -lt $fill ]; do bar="${bar}▓"; i=$((i+1)); done
-i=0; while [ $i -lt $empty ]; do bar="${bar}░"; i=$((i+1)); done
+# ━ filled (band color) / ─ empty (dim): ░ renders near-invisible in Windows Terminal fonts
+bar="$CC"; i=0; while [ $i -lt $fill ]; do bar="${bar}━"; i=$((i+1)); done
+bar="${bar}${R}${D}"; i=0; while [ $i -lt $empty ]; do bar="${bar}─"; i=$((i+1)); done; bar="${bar}${R}"
 
 # ---- assemble line 1 ----
 L1="${PETC}${PET}${R}  ${B}${MODEL}${R}"
@@ -157,7 +163,7 @@ L1="${PETC}${PET}${R}  ${B}${MODEL}${R}"
 [ "$SEVEN" -ge 0 ] && L1="${L1} ${D}·${R} ${D}7d${R} ${SEVEN}%"
 
 # ---- assemble line 2 ----
-L2="${CC}${bar}${R} ${CC}${CTX}%${R}"
+L2="${bar} ${CC}${CTX}%${R}"
 [ -n "$BRANCH" ] && L2="${L2}  ${D}⎇${R} ${BRANCH}${DIRTY:+${YE}*${R}}"
 [ -n "$WT" ]     && L2="${L2} ${D}⑂${WT}${R}"
 # badge: dim the "prefix:" part when present, so the value stays readable
